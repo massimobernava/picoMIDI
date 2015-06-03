@@ -257,20 +257,20 @@ uchar usbFunctionDescriptor(usbRequest_t * rq) {
 /* ----------------------------- USB interface ----------------------------- */
 /* ------------------------------------------------------------------------- */
 
-static uchar    sendEmptyFrame;
+//static uchar    sendEmptyFrame; 
 // static uchar    modeBuffer[7];
 
 uchar usbFunctionSetup(uchar data[8]) 
 {
 	usbRequest_t    *rq = (usbRequest_t *)((void *)data);
 
-  if((rq->bmRequestType & USBRQ_TYPE_MASK) == USBRQ_TYPE_CLASS){    /* class request type */
+  /*if((rq->bmRequestType & USBRQ_TYPE_MASK) == USBRQ_TYPE_CLASS){    // class request type 
     
-    /*  Prepare bulk-in endpoint to respond to early termination   */
+    //  Prepare bulk-in endpoint to respond to early termination 
     if ((rq->bmRequestType & USBRQ_DIR_MASK) ==
 	USBRQ_DIR_HOST_TO_DEVICE)
       sendEmptyFrame = 1;
-  }
+  }*/
   return 0xff;
 }
 
@@ -317,7 +317,10 @@ void (*cbSerialNoteOff)(byte ch, byte note, byte vel);
 void (*cbSerialNoteOn)(byte ch, byte note, byte vel);
 void (*cbSerialSimpleSysex)(byte cmd, byte data1, byte data2, byte data3);
 
-byte checkMidiMessage(byte *pMidi){
+void (*cbSTK500Response)(byte data1, byte data2, byte data3,byte data4, byte data5);
+
+
+static byte checkMidiMessage(byte *pMidi){
   if(((*(pMidi + 1) & 0xf0)== 0x90)&&(*(pMidi + 3) != 0)){
     return NOTEON_KIND;
   }else if(((*(pMidi + 1) & 0xf0)== 0x90)&&(*(pMidi + 3) == 0)){
@@ -411,11 +414,11 @@ static void hardwareInit(void) {
 }
 //============================================================
 
-
-
 //============================================================
 // CLASS USB_MIDI_DEVICE
 //============================================================
+
+#define USB_BUFFER_SIZE 8
 
 class UsbMidiDevice {
 
@@ -436,7 +439,7 @@ public:
 		usbDeviceConnect();
   		usbInit();
 		
-  		sendEmptyFrame = 0;
+  		//sendEmptyFrame = 0;
 		
   		sei();
   		//PORTB = 1;
@@ -522,14 +525,32 @@ public:
 	}
 private:
 	//TODO:CircularBuffer
-	byte buffer[8];
+	byte buffer[USB_BUFFER_SIZE];
 	byte buffer_size = 0;
 
 };
 //============================================================
 
-#define IN_BUFFER_SIZE 16
-#define OUT_BUFFER_SIZE 16
+//============================================================
+// SERIAL BUFFER
+//============================================================
+
+#define SERIAL_IN_BUFFER_SIZE 16
+#define SERIAL_OUT_BUFFER_SIZE 16
+
+byte in_buffer[SERIAL_IN_BUFFER_SIZE];
+byte out_buffer[SERIAL_OUT_BUFFER_SIZE];
+byte in_buffer_head = 0;
+byte in_buffer_tail = 0;
+byte out_buffer_head = 0;
+byte out_buffer_tail = 0;
+	
+//============================================================
+// CLASS SERIAL_MIDI_DEVICE
+//============================================================
+
+//#define SERIAL_IN_BUFFER_SIZE 16
+//#define SERIAL_OUT_BUFFER_SIZE 16
 
 class SerialMidiDevice {
 
@@ -538,22 +559,27 @@ public:
 	}
 
 	void init(){
+		
+		UCSRA &= ~_BV(U2X); 
 	  	// set baud rate 
-  		UBRRL	= 31; //		// 312500Hz at 16MHz clock 
+  		UBRRL	= 31; 		// 31250Hz baud at 16MHz clock UBRRL=(F_CPU/(UART_BAUD_RATE*16L)) - 1
 
 		UCSRB	= (1<<RXEN) | (1<<TXEN);
 	}
-  
+  	void flush()
+  	{
+  		in_buffer_head=in_buffer_tail;
+  	}
 	void update() {
 	    	//    send to Serial MIDI line    
     	if( (UCSRA & (1<<UDRE)) && out_buffer_head!=out_buffer_tail ) {
       		UDR = out_buffer[out_buffer_tail];
-      		out_buffer_tail=(out_buffer_tail+1)%OUT_BUFFER_SIZE;
+      		out_buffer_tail=(out_buffer_tail+1)%SERIAL_OUT_BUFFER_SIZE;
     	}
     	
    		//    receive from Serial MIDI line    
     	if( UCSRA & (1<<RXC)) {      		
-      		byte i=(in_buffer_head+1)%IN_BUFFER_SIZE;
+      		byte i=(in_buffer_head+1)%SERIAL_IN_BUFFER_SIZE;
       		if(i!=in_buffer_tail)
       		{
       			in_buffer[in_buffer_head]=UDR;
@@ -561,25 +587,29 @@ public:
       			if((in_buffer[in_buffer_tail]&0xf0)==0x90)//NOTE_ON
       			{
       				//TODO: available_data_in_buffer()
-      				if( ((in_buffer_tail+1)%IN_BUFFER_SIZE)!=in_buffer_head && ((in_buffer_tail+2)%IN_BUFFER_SIZE)!=in_buffer_head )
+      				if( ((in_buffer_tail+1)%SERIAL_IN_BUFFER_SIZE)!=in_buffer_head && 
+      					((in_buffer_tail+2)%SERIAL_IN_BUFFER_SIZE)!=in_buffer_head 
+      					)
       				{
-      					(*cbSerialNoteOn)(in_buffer[in_buffer_tail]&0x0f,in_buffer[(in_buffer_tail+1)%IN_BUFFER_SIZE]&0x7f,in_buffer[(in_buffer_tail+2)%IN_BUFFER_SIZE]&0x7f);
+      					(*cbSerialNoteOn)(in_buffer[in_buffer_tail]&0x0f,in_buffer[(in_buffer_tail+1)%SERIAL_IN_BUFFER_SIZE]&0x7f,in_buffer[(in_buffer_tail+2)%SERIAL_IN_BUFFER_SIZE]&0x7f);
       					in_buffer_tail=in_buffer_head;
+      					//in_buffer_tail=(in_buffer_tail+3)%SERIAL_IN_BUFFER_SIZE;
       				}
       			}
       			else if(in_buffer[in_buffer_tail]==0xf0)//Sysex
       			{
       				//TODO: available_data_in_buffer()
-      				if( ((in_buffer_tail+1)%IN_BUFFER_SIZE)!=in_buffer_head && 
-      				    ((in_buffer_tail+2)%IN_BUFFER_SIZE)!=in_buffer_head &&
-      				    ((in_buffer_tail+3)%IN_BUFFER_SIZE)!=in_buffer_head &&
-      				    ((in_buffer_tail+4)%IN_BUFFER_SIZE)!=in_buffer_head &&
-      				    ((in_buffer_tail+5)%IN_BUFFER_SIZE)!=in_buffer_head &&
-      				    ((in_buffer_tail+6)%IN_BUFFER_SIZE)!=in_buffer_head
+      				if( ((in_buffer_tail+1)%SERIAL_IN_BUFFER_SIZE)!=in_buffer_head && 
+      				    ((in_buffer_tail+2)%SERIAL_IN_BUFFER_SIZE)!=in_buffer_head &&
+      				    ((in_buffer_tail+3)%SERIAL_IN_BUFFER_SIZE)!=in_buffer_head &&
+      				    ((in_buffer_tail+4)%SERIAL_IN_BUFFER_SIZE)!=in_buffer_head &&
+      				    ((in_buffer_tail+5)%SERIAL_IN_BUFFER_SIZE)!=in_buffer_head &&
+      				    ((in_buffer_tail+6)%SERIAL_IN_BUFFER_SIZE)!=in_buffer_head
       				    )
       				{
-      					(*cbSerialSimpleSysex)(in_buffer[in_buffer_tail+2]&0x7f,in_buffer[(in_buffer_tail+3)%IN_BUFFER_SIZE]&0x7f,in_buffer[(in_buffer_tail+4)%IN_BUFFER_SIZE]&0x7f,in_buffer[(in_buffer_tail+5)%IN_BUFFER_SIZE]&0x7f);
+      					(*cbSerialSimpleSysex)(in_buffer[in_buffer_tail+2]&0x7f,in_buffer[(in_buffer_tail+3)%SERIAL_IN_BUFFER_SIZE]&0x7f,in_buffer[(in_buffer_tail+4)%SERIAL_IN_BUFFER_SIZE]&0x7f,in_buffer[(in_buffer_tail+5)%SERIAL_IN_BUFFER_SIZE]&0x7f);
       					in_buffer_tail=in_buffer_head;
+      					//in_buffer_tail=(in_buffer_tail+7)%SERIAL_IN_BUFFER_SIZE;
       				}
       			}
       			else
@@ -595,10 +625,10 @@ public:
 		out_buffer[out_buffer_head]=0x90|ch;
 		
 		//TODO: verifica available_space_out_buffer()
-		out_buffer[(out_buffer_head+1)%OUT_BUFFER_SIZE]=note&0x7f;
-		out_buffer[(out_buffer_head+2)%OUT_BUFFER_SIZE]=vel&0x7f;
+		out_buffer[(out_buffer_head+1)%SERIAL_OUT_BUFFER_SIZE]=note&0x7f;
+		out_buffer[(out_buffer_head+2)%SERIAL_OUT_BUFFER_SIZE]=vel&0x7f;
 		
-		out_buffer_head=(out_buffer_head+3)%OUT_BUFFER_SIZE;
+		out_buffer_head=(out_buffer_head+3)%SERIAL_OUT_BUFFER_SIZE;
 	}
 
 	void sendSimpleSysex(byte cmd, byte data1, byte data2,byte data3){
@@ -606,14 +636,14 @@ public:
 		out_buffer[out_buffer_head]=0xf0;
 		
 		//TODO: verifica available_space_out_buffer()
-		out_buffer[(out_buffer_head+1)%OUT_BUFFER_SIZE]=0x77;
-		out_buffer[(out_buffer_head+2)%OUT_BUFFER_SIZE]=cmd&0x7f;
-		out_buffer[(out_buffer_head+3)%OUT_BUFFER_SIZE]=data1&0x7f;
-		out_buffer[(out_buffer_head+4)%OUT_BUFFER_SIZE]=data2&0x7f;
-		out_buffer[(out_buffer_head+5)%OUT_BUFFER_SIZE]=data3&0x7f;
-		out_buffer[(out_buffer_head+6)%OUT_BUFFER_SIZE]=0xf7;
+		out_buffer[(out_buffer_head+1)%SERIAL_OUT_BUFFER_SIZE]=0x77;
+		out_buffer[(out_buffer_head+2)%SERIAL_OUT_BUFFER_SIZE]=cmd&0x7f;
+		out_buffer[(out_buffer_head+3)%SERIAL_OUT_BUFFER_SIZE]=data1&0x7f;
+		out_buffer[(out_buffer_head+4)%SERIAL_OUT_BUFFER_SIZE]=data2&0x7f;
+		out_buffer[(out_buffer_head+5)%SERIAL_OUT_BUFFER_SIZE]=data3&0x7f;
+		out_buffer[(out_buffer_head+6)%SERIAL_OUT_BUFFER_SIZE]=0xf7;
 		
-		out_buffer_head=(out_buffer_head+8)%OUT_BUFFER_SIZE;
+		out_buffer_head=(out_buffer_head+7)%SERIAL_OUT_BUFFER_SIZE;
 		
 	}
 	
@@ -627,24 +657,237 @@ private:
 
 	byte available_space_in_buffer()
 	{
-		return (in_buffer_tail>in_buffer_head)?in_buffer_tail-in_buffer_head:IN_BUFFER_SIZE-(in_buffer_head-in_buffer_tail);
+		return (in_buffer_tail>in_buffer_head)?in_buffer_tail-in_buffer_head:SERIAL_IN_BUFFER_SIZE-(in_buffer_head-in_buffer_tail);
 	}
 	byte available_data_in_buffer()
 	{
-		return (in_buffer_tail>in_buffer_head)?IN_BUFFER_SIZE-(in_buffer_tail-in_buffer_head):in_buffer_head-in_buffer_tail;
+		return (in_buffer_tail>in_buffer_head)?SERIAL_IN_BUFFER_SIZE-(in_buffer_tail-in_buffer_head):in_buffer_head-in_buffer_tail;
 	}
 	
-	byte in_buffer[IN_BUFFER_SIZE];
-	byte out_buffer[OUT_BUFFER_SIZE];
+	/*byte in_buffer[SERIAL_IN_BUFFER_SIZE];
+	byte out_buffer[SERIAL_OUT_BUFFER_SIZE];
 	byte in_buffer_head = 0;
 	byte in_buffer_tail = 0;
 	byte out_buffer_head = 0;
-	byte out_buffer_tail = 0;
+	byte out_buffer_tail = 0;*/
 
+};
+//============================================================
+
+//============================================================
+// CLASS STK500
+//============================================================
+
+//#define STK500_IN_BUFFER_SIZE 8
+//#define STK500_OUT_BUFFER_SIZE 8
+
+#define PAGE_SIZE 128
+
+//STK500 PROTOCOL
+#define Sync_CRC_EOP               	0x20
+
+#define Cmnd_STK_GET_SYNC          	0x30
+#define Cmnd_STK_GET_PARAMETER 		0x41
+#define Cmnd_STK_ENTER_PROGMODE	   	0x50
+#define Cmnd_STK_LEAVE_PROGMODE 	0x51
+#define Cmnd_STK_LOAD_ADDRESS  		0x55
+#define Cmnd_STK_PROG_PAGE   		0x64
+#define Cmnd_STK_READ_PAGE   		0x74
+#define Cmnd_STK_READ_SIGN   		0x75
+
+//#define Parm_STK_HW_VER   			0x80
+#define Parm_STK_SW_MAJOR   		0x81
+#define Parm_STK_SW_MINOR   		0x82
+//#define Parm_STK_DEVICE   			0x92
+
+#define Resp_STK_OK                0x10
+//#define Resp_STK_FAILED            0x11
+//#define Resp_STK_UNKNOWN           0x12
+//#define Resp_STK_NODEVICE          0x13
+#define Resp_STK_INSYNC            0x14
+//#define Resp_STK_NOSYNC            0x15
+
+class STK500 {
+
+public:
+	STK500 () {
+	
+	}
+
+	void init(){
+	  	// set baud rate 
+  		//UBRRL	= 8; 		//115200Hz baud at 16MHz clock UBRRL=(F_CPU/(UART_BAUD_RATE*16L)) - 1
+
+		//DDRB |= _BV(0);//DEBUG
+			
+		UCSRA |= _BV(U2X); //Double speed mode USART
+  		UCSRB = _BV(RXEN) | _BV(TXEN);  // enable Rx & Tx
+  		//UCSRC = _BV(URSEL) | _BV(UCSZ1) | _BV(UCSZ0);  // config USART; 8N1
+  		UBRRL = (uint8_t)( (16000000 + 115200 * 4L) / (115200 * 8L) - 1 );
+  		
+		
+	}
+	void flush()
+  	{
+  		in_buffer_head=in_buffer_tail;
+  	}
+	void update()
+	{
+		if( (UCSRA & (1<<UDRE)) && out_buffer_head!=out_buffer_tail ) {
+      		UDR = out_buffer[out_buffer_tail];
+      		out_buffer_tail=(out_buffer_tail+1)%SERIAL_OUT_BUFFER_SIZE;
+      		
+      		//PORTB ^= _BV(0);//DEBUG
+    	}
+    
+    	if( UCSRA & (1<<RXC)) {      		
+      		byte i=(in_buffer_head+1)%SERIAL_IN_BUFFER_SIZE;
+      		if(i!=in_buffer_tail)
+      		{
+      			//PORTB ^= _BV(0);//DEBUG
+      		
+      			in_buffer[in_buffer_head]=UDR;
+      			in_buffer_head=i;
+      			if(in_buffer[in_buffer_tail]==Resp_STK_INSYNC)
+      			{
+      				//(*cbSTK500Response)(in_buffer[(in_buffer_tail+1)%SERIAL_IN_BUFFER_SIZE] ,0x0B,0x00,0x00,0x00);//DEBUG
+					byte response[]={0,0,0,0};
+      				for(byte j=1;j<5;j++)
+      				{
+      					if( ((in_buffer_tail+j)%SERIAL_IN_BUFFER_SIZE)!=in_buffer_head )
+      					{
+      						response[j-1]=in_buffer[(in_buffer_tail+j)%SERIAL_IN_BUFFER_SIZE];
+      						if(response[j-1]==Resp_STK_OK)
+      						{
+      							(*cbSTK500Response)(Resp_STK_INSYNC,response[0],response[1],response[2],response[3]);
+      							in_buffer_tail=(in_buffer_tail+j+1)%SERIAL_IN_BUFFER_SIZE;
+      							break;
+      						}
+      					}
+      					else break;
+      				}
+      			}
+      			/*else if(in_buffer[in_buffer_tail]==Resp_STK_NOSYNC)
+      			{
+      				(*cbSTK500Response)(Resp_STK_NOSYNC,0x00,0x00,0x00,0x00);
+      				in_buffer_tail=in_buffer_head;
+      			}*/
+      			else
+      			{
+      				//(*cbSTK500Response)(in_buffer[in_buffer_tail] ,0x0A,0x00,0x00,0x00);//DEBUG
+      				
+      				//Flush
+      			 	//in_buffer_head=in_buffer_tail;
+      			 	//Or Next
+      			 	in_buffer_tail=(in_buffer_tail+1)%SERIAL_IN_BUFFER_SIZE;
+      			 }
+      		}
+      	}
+	}
+	
+	void getsync()
+	{
+  		out_buffer[out_buffer_head]=Cmnd_STK_GET_SYNC;
+		out_buffer[(out_buffer_head+1)%SERIAL_OUT_BUFFER_SIZE]=Sync_CRC_EOP;
+		
+		out_buffer_head=(out_buffer_head+2)%SERIAL_OUT_BUFFER_SIZE;
+	}
+	
+	void getparam(byte param)
+	{
+  		out_buffer[out_buffer_head]=Cmnd_STK_GET_PARAMETER;
+		out_buffer[(out_buffer_head+1)%SERIAL_OUT_BUFFER_SIZE]=param;
+		out_buffer[(out_buffer_head+2)%SERIAL_OUT_BUFFER_SIZE]=Sync_CRC_EOP;
+		
+		out_buffer_head=(out_buffer_head+3)%SERIAL_OUT_BUFFER_SIZE;
+	}
+	
+	void enter_progmode()
+	{
+  		out_buffer[out_buffer_head]=Cmnd_STK_ENTER_PROGMODE;
+		out_buffer[(out_buffer_head+1)%SERIAL_OUT_BUFFER_SIZE]=Sync_CRC_EOP;
+		
+		out_buffer_head=(out_buffer_head+2)%SERIAL_OUT_BUFFER_SIZE;
+	}
+	
+	void loadaddr(byte haddr, byte laddr)
+	{
+  		out_buffer[out_buffer_head]=Cmnd_STK_LOAD_ADDRESS;
+		out_buffer[(out_buffer_head+1)%SERIAL_OUT_BUFFER_SIZE]=laddr;
+		out_buffer[(out_buffer_head+2)%SERIAL_OUT_BUFFER_SIZE]=haddr;
+		out_buffer[(out_buffer_head+3)%SERIAL_OUT_BUFFER_SIZE]=Sync_CRC_EOP;
+		
+		out_buffer_head=(out_buffer_head+4)%SERIAL_OUT_BUFFER_SIZE;
+	}
+	
+	void prog_page(byte state, byte data2, byte data3)
+	{
+		if(state==0) //START
+		{
+			out_buffer[out_buffer_head]=Cmnd_STK_PROG_PAGE;
+			out_buffer[(out_buffer_head+1)%SERIAL_OUT_BUFFER_SIZE]=0;
+			out_buffer[(out_buffer_head+2)%SERIAL_OUT_BUFFER_SIZE]=PAGE_SIZE;
+			out_buffer[(out_buffer_head+3)%SERIAL_OUT_BUFFER_SIZE]='F';
+		
+			out_buffer_head=(out_buffer_head+4)%SERIAL_OUT_BUFFER_SIZE;
+		}
+		out_buffer[out_buffer_head]=data2;
+		out_buffer[(out_buffer_head+1)%SERIAL_OUT_BUFFER_SIZE]=data3;
+		
+		out_buffer_head=(out_buffer_head+2)%SERIAL_OUT_BUFFER_SIZE;
+		
+		if(state==2)  //END
+		{
+			out_buffer[out_buffer_head]=Sync_CRC_EOP;
+			
+			out_buffer_head=(out_buffer_head+1)%SERIAL_OUT_BUFFER_SIZE;
+		}
+	}
+	
+	void read_page(byte length)
+	{
+		out_buffer[out_buffer_head]=Cmnd_STK_READ_PAGE;
+		out_buffer[(out_buffer_head+1)%SERIAL_OUT_BUFFER_SIZE]=0;
+		out_buffer[(out_buffer_head+2)%SERIAL_OUT_BUFFER_SIZE]=length;
+		out_buffer[(out_buffer_head+3)%SERIAL_OUT_BUFFER_SIZE]='F';
+		out_buffer[(out_buffer_head+4)%SERIAL_OUT_BUFFER_SIZE]=Sync_CRC_EOP;
+		
+		out_buffer_head=(out_buffer_head+5)%SERIAL_OUT_BUFFER_SIZE;
+	}
+	
+	void read_sign()
+	{
+		out_buffer[out_buffer_head]=Cmnd_STK_READ_SIGN;
+		out_buffer[(out_buffer_head+1)%SERIAL_OUT_BUFFER_SIZE]=Sync_CRC_EOP;
+		
+		out_buffer_head=(out_buffer_head+2)%SERIAL_OUT_BUFFER_SIZE;
+	}
+	
+	void leave_progmode()
+	{
+  		out_buffer[out_buffer_head]=Cmnd_STK_LEAVE_PROGMODE;
+		out_buffer[(out_buffer_head+1)%SERIAL_OUT_BUFFER_SIZE]=Sync_CRC_EOP;
+		
+		out_buffer_head=(out_buffer_head+2)%SERIAL_OUT_BUFFER_SIZE;
+	}
+	
+	void setHdlResponse(void (*fptr)(byte data1, byte data2, byte data3, byte data4, byte data5)){
+ 		cbSTK500Response = fptr;
+	}
+	
+private:
+
+/*	byte out_buffer[STK500_OUT_BUFFER_SIZE];
+	byte in_buffer[STK500_IN_BUFFER_SIZE];
+	byte in_buffer_head = 0;
+	byte in_buffer_tail = 0;
+	byte out_buffer_head = 0;
+	byte out_buffer_tail = 0;*/
 };
 //============================================================
 
 UsbMidiDevice UsbMidi = UsbMidiDevice();
 SerialMidiDevice SerialMidi = SerialMidiDevice();
+STK500 stk500 = STK500();
 
 #endif // __picoMIDI_h__
