@@ -16,8 +16,8 @@
           "category": "Contributed",
           "url": "https://github.com/massimobernava/tiny/archive/master.zip",
           "archiveFileName": "tiny-master.zip",
-          "checksum": "SHA-256:804261ad93fae3556156191f25612c8a38f904660cb8b24e6935fbd5f9fe0e86",
-          "size": "165630",
+          "checksum": "SHA-256:be6c9dca64b1655c8cfc5679cbb2ff4b2bfe2c120da8cec7ecbf298025d9bde4",
+          "size": "165603",
           "boards": [
             { "name": "ATtiny24" },
             { "name": "ATtiny44" },
