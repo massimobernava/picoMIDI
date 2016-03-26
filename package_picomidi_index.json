@@ -1,0 +1,48 @@
+{
+  "packages": [
+    {
+      "name": "tiny",
+      "maintainer": "Massimo Bernava",
+      "websiteURL": "http://www.microdrum.net",
+      "email": "massimo.bernava@gmail.com",
+      "help": {
+        "online": "https://github.com/massimobernava/picoMIDI"
+      },
+      "platforms": [
+        {
+          "name": "ATtiny extra Boards",
+          "architecture": "avr",
+          "version": "1.0.0",
+          "category": "Contributed",
+          "url": "https://github.com/massimobernava/tiny/releases/download/v1.0.0/tiny-1.0.0.zip",
+          "archiveFileName": "tiny-1.0.0.zip",
+          "checksum": "SHA-256:1db82c3dfa019b2a9ca482df7fccc9249fe46c38239583ba6dddab03abfe59ee",
+          "size": "213493",
+          "boards": [
+            { "name": "ATtiny24" },
+            { "name": "ATtiny44" },
+            { "name": "ATtiny84" },
+            { "name": "ATtiny25" },
+            { "name": "ATtiny45" },
+            { "name": "ATtiny85" },
+            { "name": "ATtiny2313" },
+            { "name": "ATtiny4313" }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "avr-gcc",
+              "version": "4.8.1-arduino5"
+            },
+            {
+              "packager": "arduino",
+              "name": "avrdude",
+              "version": "6.0.1-arduino5"
+            }
+          ]
+        }
+      ],
+      "tools": []
+    }
+  ]
+}

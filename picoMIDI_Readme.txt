@@ -39,3 +39,7 @@ attiny4313at16.build.mcu=attiny4313
 attiny4313at16.build.f_cpu=16000000L
 attiny4313at16.build.core=tiny
 
+###########################################################################
+
+use: https://raw.githubusercontent.com/massimobernava/picoMIDI/master/package_picomidi_index.json
+
